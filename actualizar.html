@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Actualizar datos - Buscacursos UCSH</title>
+<style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #f0f4f8; color: #333; }
+    header { background: #004d99; color: white; padding: 10px 20px; text-align: center; }
+    header h1 { margin: 0; font-size: 1.15rem; }
+    main { max-width: 760px; margin: 18px auto; padding: 0 14px; }
+    .card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 18px; margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+    .card h2 { margin: 0 0 8px; font-size: 1rem; color: #004d99; }
+    .hint { font-size: 12.5px; color: #64748b; line-height: 1.5; }
+    #drop { border: 2px dashed #94a3b8; border-radius: 8px; padding: 26px 12px; text-align: center; cursor: pointer; background: #f8fafc; transition: background 0.15s, border-color 0.15s; }
+    #drop.over, #drop:hover { background: #eff6ff; border-color: #004d99; }
+    #drop strong { color: #004d99; }
+    #file-name { margin-top: 8px; font-size: 13px; color: #334155; }
+    label.opt { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin: 8px 0; cursor: pointer; }
+    label.opt input { margin-top: 3px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 8px 0; }
+    .stat { background: #f1f5f9; border-radius: 6px; padding: 8px; text-align: center; }
+    .stat b { display: block; font-size: 1.3rem; color: #004d99; }
+    .stat span { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.4px; }
+    .ok { color: #15803d; font-weight: bold; }
+    .warn { color: #b45309; }
+    ul.avisos { max-height: 160px; overflow-y: auto; font-size: 12px; margin: 6px 0 0; padding-left: 18px; color: #b45309; }
+    button.dl { background: #004d99; color: white; border: none; border-radius: 6px; padding: 10px 18px; font-size: 14px; cursor: pointer; margin-top: 10px; }
+    button.dl:hover { background: #003d7a; }
+    ol { padding-left: 20px; font-size: 13px; line-height: 1.6; margin: 6px 0 0; }
+    .hidden { display: none; }
+    code { background: #f1f5f9; padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<header><h1>🔄 Actualizar datos del Buscacursos UCSH</h1></header>
+<main>
+    <div class="card">
+        <h2>1. Sube el Excel</h2>
+        <div id="drop">
+            <div>Arrastra aquí el archivo <strong>concentrado.xlsx</strong> o haz clic para elegirlo</div>
+            <div id="file-name" class="hint"></div>
+        </div>
+        <input type="file" id="file-input" accept=".xlsx,.xls" class="hidden">
+        <p class="hint">Todo se procesa en tu computador; el archivo no se sube a ningún servidor. Columnas esperadas (en este orden): Sigla, Nombre, tipo, sección, cupos, horario, jornada, Profesor. La primera fila puede ser el encabezado.</p>
+    </div>
+
+    <div class="card">
+        <h2>2. Opciones</h2>
+        <label class="opt"><input type="checkbox" id="opt-unir" checked>
+            <span>Incluir todos los profesores de cada sección (por ejemplo, el de cátedra y el de laboratorio). Si lo desmarcas, se usa solo el profesor de la primera fila de la sección, como antes.</span></label>
+    </div>
+
+    <div id="resultado" class="card hidden">
+        <h2>3. Revisión</h2>
+        <div class="stats">
+            <div class="stat"><b id="s-filas">0</b><span>Filas</span></div>
+            <div class="stat"><b id="s-cursos">0</b><span>Cursos</span></div>
+            <div class="stat"><b id="s-secciones">0</b><span>Secciones</span></div>
+            <div class="stat"><b id="s-bloques">0</b><span>Bloques</span></div>
+        </div>
+        <div id="detalle" class="hint"></div>
+        <div id="avisos-box" class="hidden">
+            <div class="warn" style="font-size:13px; margin-top:8px;"><b>Avisos</b> (revisa estas filas del Excel):</div>
+            <ul class="avisos" id="avisos"></ul>
+        </div>
+        <button class="dl" id="descargar">⬇️ Descargar data.js</button>
+    </div>
+
+    <div class="card">
+        <h2>4. Publicar</h2>
+        <ol>
+            <li>Reemplaza el archivo <code>data.js</code> de tu repositorio de GitHub por el que descargaste.</li>
+            <li>Haz commit y espera un minuto a que GitHub Pages actualice la página.</li>
+            <li>Si cambió el semestre, actualiza a mano el título en <code>index.html</code> (por ejemplo, <code>Buscacursos UCSH 2026-02</code>).</li>
+            <li>Comprueba que algún curso nuevo aparezca bien.</li>
+        </ol>
+    </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+// ---------- NÚCLEO DE CONVERSIÓN (Excel -> datosCursos) ----------
+const DIAS_VALIDOS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const PARTICULAS_MINUSCULA = new Set(['de', 'del', 'los', 'las']);
+
+// Equivalente a str.title() de Python
+function tituloPython(texto) {
+    return texto.toLowerCase().replace(/(^|[^\p{L}])(\p{L})/gu, (m, pre, letra) => pre + letra.toUpperCase());
+}
+
+function normalizarProfesor(crudo) {
+    const limpio = String(crudo == null ? '' : crudo).trim().replace(/;+\s*$/, '').trim();
+    if (!limpio) return '';
+    return limpio.split(';').map(p => {
+        p = p.trim();
+        if (!p) return '';
+        if (p.toLowerCase() === 'sin asignar') return 'Sin asignar';
+        return tituloPython(p).split(/\s+/).map(w => PARTICULAS_MINUSCULA.has(w.toLowerCase()) ? w.toLowerCase() : w).join(' ');
+    }).filter(Boolean).join(';');
+}
+
+function hhmm(t) {
+    const [h, m] = t.split(':');
+    return h.padStart(2, '0') + ':' + m;
+}
+
+const REGEX_BLOQUE = /^\s*([^:|]+?)\s*:\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s*(?:\((.*)\))?\s*$/;
+
+function parsearHorario(texto, tipo, avisos, fila) {
+    const bloques = [];
+    String(texto || '').split('|').forEach(seg => {
+        if (!seg.trim()) return;
+        const m = seg.match(REGEX_BLOQUE);
+        if (!m) { avisos.push(`Fila ${fila}: no se pudo interpretar el horario "${seg.trim()}"`); return; }
+        const dia = m[1].trim();
+        if (!DIAS_VALIDOS.includes(dia)) avisos.push(`Fila ${fila}: día no reconocido "${dia}"`);
+        bloques.push({ dia, inicio: hhmm(m[2]), fin: hhmm(m[3]), tipo, sala: (m[4] || '').trim() });
+    });
+    return bloques;
+}
+
+// filas: arreglo de arreglos [sigla, nombre, tipo, sección, cupos, horario, jornada, profesor]
+function convertirFilas(filas, opciones = {}) {
+    const unirProfesores = opciones.unirProfesores !== false;
+    const avisos = [];
+    const cursos = new Map();
+    let filasLeidas = 0, filasOmitidas = 0, bloquesTotal = 0;
+    let inicio = 0;
+    if (filas.length && String(filas[0][0] || '').trim().toLowerCase() === 'sigla') inicio = 1;
+
+    for (let i = inicio; i < filas.length; i++) {
+        const f = filas[i] || [];
+        const nFila = i + 1;
+        const sigla = String(f[0] == null ? '' : f[0]).trim();
+        if (!sigla) { if (f.some(c => String(c == null ? '' : c).trim())) { filasOmitidas++; avisos.push(`Fila ${nFila}: sin sigla, se omitió`); } continue; }
+        filasLeidas++;
+        const nombre = String(f[1] == null ? '' : f[1]).trim();
+        const tipo = String(f[2] == null ? '' : f[2]).trim();
+        const idSec = String(f[3] == null ? '' : f[3]).trim();
+        const cuposNum = parseInt(String(f[4] == null ? '' : f[4]).trim(), 10);
+        if (isNaN(cuposNum)) avisos.push(`Fila ${nFila}: cupos no numérico en ${sigla}-${idSec}, se usó 0`);
+        const horario = parsearHorario(f[5], tipo, avisos, nFila);
+        const prof = normalizarProfesor(f[7]);
+
+        if (!cursos.has(sigla)) cursos.set(sigla, { sigla, nombre, secciones: new Map() });
+        const curso = cursos.get(sigla);
+        if (!curso.secciones.has(idSec)) curso.secciones.set(idSec, { id: idSec, cupos: isNaN(cuposNum) ? 0 : cuposNum, profesores: [], profPrimeraFila: prof, horario: [] });
+        const sec = curso.secciones.get(idSec);
+        sec.horario.push(...horario);
+        prof.split(';').filter(Boolean).forEach(p => { if (!sec.profesores.includes(p)) sec.profesores.push(p); });
+    }
+
+    let seccionesTotal = 0, seccionesVariosProf = 0;
+    const resultado = [...cursos.values()].map(c => ({
+        sigla: c.sigla,
+        nombre: c.nombre,
+        secciones: [...c.secciones.values()].map(s => {
+            seccionesTotal++; bloquesTotal += s.horario.length;
+            const reales = s.profesores.filter(p => p.toLowerCase() !== 'sin asignar');
+            let profesores;
+            if (unirProfesores) {
+                profesores = reales.length ? reales : (s.profesores.length ? ['Sin asignar'] : []);
+            } else {
+                profesores = s.profPrimeraFila ? [s.profPrimeraFila] : [];
+            }
+            if (reales.length > 1) seccionesVariosProf++;
+            return { id: s.id, cupos: s.cupos, profesor: profesores.join(';'), horario: s.horario };
+        })
+    }));
+
+    return {
+        cursos: resultado,
+        stats: { filasLeidas, filasOmitidas, cursos: resultado.length, secciones: seccionesTotal, bloques: bloquesTotal, seccionesVariosProf },
+        avisos
+    };
+}
+
+function generarDataJs(cursos) {
+    const q = s => JSON.stringify(String(s));
+    let out = '';
+    out += 'const datosCursos = [\n';
+    out += cursos.map(c => {
+        const secs = c.secciones.map(s => {
+            const hs = s.horario.map(b => `                    { dia: ${q(b.dia)}, inicio: ${q(b.inicio)}, fin: ${q(b.fin)}, tipo: ${q(b.tipo)}, sala: ${q(b.sala)} }`).join(',\n');
+            return `            {\n                id: ${q(s.id)},\n                cupos: ${s.cupos},\n                profesor: ${q(s.profesor)},\n                horario: [\n${hs}\n                ]\n            }`;
+        }).join(',\n');
+        return `    {\n        sigla: ${q(c.sigla)},\n        nombre: ${q(c.nombre)},\n        secciones: [\n${secs}\n        ]\n    }`;
+    }).join(',\n');
+    out += '\n];\n';
+    return out;
+}
+
+
+// ---------- INTERFAZ ----------
+const $ = id => document.getElementById(id);
+let filasExcel = null;
+let dataJsActual = '';
+
+function procesar() {
+    if (!filasExcel) return;
+    const r = convertirFilas(filasExcel, { unirProfesores: $('opt-unir').checked });
+    $('s-filas').textContent = r.stats.filasLeidas;
+    $('s-cursos').textContent = r.stats.cursos;
+    $('s-secciones').textContent = r.stats.secciones;
+    $('s-bloques').textContent = r.stats.bloques;
+    const sinAvisos = r.avisos.length === 0 && r.stats.filasOmitidas === 0;
+    $('detalle').innerHTML = (sinAvisos ? '<span class="ok">✔ Todas las filas y todos los horarios se interpretaron correctamente.</span><br>' : '')
+        + `Secciones con más de un profesor: <b>${r.stats.seccionesVariosProf}</b>. `
+        + 'Compara estos números con los de tu Excel (una fila por sección y tipo).';
+    $('avisos-box').classList.toggle('hidden', r.avisos.length === 0);
+    $('avisos').innerHTML = r.avisos.map(a => `<li>${a.replace(/</g, '&lt;')}</li>`).join('');
+    dataJsActual = generarDataJs(r.cursos);
+    $('resultado').classList.remove('hidden');
+}
+
+function leerArchivo(file) {
+    if (!file) return;
+    $('file-name').textContent = 'Leyendo ' + file.name + '...';
+    const reader = new FileReader();
+    reader.onload = e => {
+        try {
+            const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+            const hoja = wb.Sheets[wb.SheetNames[0]];
+            filasExcel = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: '', raw: true });
+            $('file-name').textContent = '📄 ' + file.name + ' (hoja "' + wb.SheetNames[0] + '")';
+            procesar();
+        } catch (err) {
+            $('file-name').textContent = 'No se pudo leer el archivo: ' + err.message;
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+const drop = $('drop'), input = $('file-input');
+drop.addEventListener('click', () => input.click());
+input.addEventListener('change', () => leerArchivo(input.files[0]));
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => leerArchivo(e.dataTransfer.files[0]));
+$('opt-unir').addEventListener('change', procesar);
+
+$('descargar').addEventListener('click', () => {
+    const blob = new Blob([dataJsActual], { type: 'text/javascript;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'data.js';
+    a.click();
+    URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>
